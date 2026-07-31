@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>たまごエクスプレス</title>
+  <!-- p5.js ライブラリの読み込み -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: #f0fff0;
+    }
+    canvas {
+      display: block;
+      width: 100% !important;
+      height: 100% !important;
+    }
+  </style>
+</head>
+<body>
+
+<script>
+let eggs = []; // 最初のお湯ステージ用
+let maxEggs = 10;
+let boiledCount = 0;
+let remainingEggs = 10; // 運搬中の卵の数
+
+// 汽車とゲームのデータ
+let trainX, trainY, trainWidth, trainHeight;
+let trainSpeed = 5;
+let makkuros = [];
+let fallingEggs = []; // 落ちた卵の管理用
+
+// タイマー設定（1分 ＝ 60秒 ＝ 3600フレーム）
+let maxFrames = 60 * 60;
+let timerFrames = maxFrames;
+
+let hitCount = 0; // マックロクロスケにあたった回数（2回ごとに掃除）
+let gameState = "make_eggs"; // make_eggs, train_run, math_quiz, clean_up, result, ending
+
+// お掃除用マックロクロスケ
+let cleanMakkuros = [];
+
+// リザルト演出用（クラッカーの紙吹雪）
+let particles = [];
+
+// エンディング用（ピクミンたちのデータ）
+let pikmins = [];
+let endingTimer = 0;
+
+// ボーナス用たしざんスター＆クイズ
+let bonusStar = null;
+let currentQuiz = { num1: 0, num2: 0, ans: 0, choices: [], resultMsg: "", timer: 0, quizLimitFrames: 300 };
+
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  initGame();
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+}
+
+function initGame() {
+  boiledCount = 0;
+  remainingEggs = 10;
+  hitCount = 0;
+  makkuros = [];
+  fallingEggs = [];
+  particles = [];
+  pikmins = [];
+  endingTimer = 0;
+  timerFrames = maxFrames;
+  bonusStar = null;
+  
+  // たまごの初期化
+  eggs = [];
+  for (let i = 0; i < maxEggs; i++) {
+    eggs.push({ 
+      x: random(width * 0.1, width * 0.9), 
+      y: random(height * 0.3, height * 0.8), 
+      isBoiled: false, 
+      size: min(width, height) * 0.1 
+    });
+  }
+  trainWidth = min(width, height) * 0.28;
+  trainHeight = trainWidth * 0.6;
+  trainX = width / 2;
+  trainY = height * 0.72;
+}
+
+function draw() {
+  if (gameState === "make_eggs") {
+    background(240, 255, 240);
+    drawEggsStage();
+  } else if (gameState === "train_run") {
+    background(200, 240, 255);
+    drawTrainStage();
+  } else if (gameState === "math_quiz") {
+    background(255, 245, 210);
+    drawMathQuizStage();
+  } else if (gameState === "clean_up") {
+    background(255, 220, 220); 
+    drawGround();
+    drawTrain(); 
+    drawCleanUpStage();
+  } else if (gameState === "result") {
+    background(255, 250, 210); 
+    drawResult();
+  } else if (gameState === "ending") {
+    background(220, 245, 220);
+    drawEndingStage();
+  }
+}
+
+// --- ステージ1: たまごをゆでる ---
+function drawEggsStage() {
+  fill(100, 150, 200, 50); 
+  rect(width * 0.05, height * 0.25, width * 0.9, height * 0.65, 20);
+  
+  for (let egg of eggs) {
+    fill(255); stroke(80); strokeWeight(3);
+    ellipse(egg.x, egg.y, egg.size * 0.8, egg.size);
+    if (egg.isBoiled) { 
+      noStroke(); fill(255, 200, 0); 
+      ellipse(egg.x, egg.y + egg.size * 0.1, egg.size * 0.4, egg.size * 0.4); 
+    }
+  }
+  
+  fill(50); noStroke(); textAlign(CENTER, TOP);
+  textSize(max(24, width * 0.04));
+  text("たまごを タップして ゆでたまごに しよう！", width/2, height * 0.05);
+  textSize(max(28, width * 0.05)); fill(255, 100, 100);
+  text("できた数: " + boiledCount + " / " + maxEggs, width/2, height * 0.13);
+}
+
+// --- ステージ2: 汽車で運ぶ ---
+function drawTrainStage() {
+  let difficulty = map(timerFrames, maxFrames, 0, 1, 3.5);
+  
+  drawGround();
+  updateTrain();
+  drawTrain();
+  updateMakkuros(difficulty);
+  drawMakkuros();
+  updateBonusStar();
+  drawBonusStar();
+  updateFallingEggs();
+  drawFallingEggs();
+  
+  timerFrames--;
+  drawAnalogClock(width - 90, 80, 60); 
+  
+  fill(0); noStroke(); textAlign(LEFT, CENTER);
+  textSize(max(24, width * 0.035));
+  text("⏱️ のこりじかん: " + ceil(timerFrames / 60) + " びょう", 40, 50);
+  fill(255, 60, 60);
+  text("🥚 のこりのたまご: " + remainingEggs + " こ", 40, 100);
+  
+  if (timerFrames <= 0 || remainingEggs <= 0) {
+    setupResultParticles();
+    gameState = "result";
+  }
+}
+
+function updateTrain() {
+  let targetX = mouseX;
+  if (touches.length > 0) {
+    targetX = touches[0].x;
+  }
+  trainX = lerp(trainX, targetX - trainWidth/2, 0.2);
+  trainX = constrain(trainX, 0, width - trainWidth);
+}
+
+function drawTrain() {
+  push(); translate(trainX, trainY);
+  fill(255, 90, 90); noStroke();
+  rect(0, 0, trainWidth * 0.7, trainHeight, 10); 
+  rect(trainWidth * 0.7, -trainHeight * 0.3, trainWidth * 0.3, trainHeight * 1.3, 10); 
+  fill(50); rect(trainWidth * 0.8, -trainHeight * 0.6, trainWidth * 0.1, trainHeight * 0.4); 
+  
+  fill(30);
+  ellipse(trainWidth * 0.2, trainHeight, trainHeight * 0.4, trainHeight * 0.4);
+  ellipse(trainWidth * 0.5, trainHeight, trainHeight * 0.4, trainHeight * 0.4);
+  ellipse(trainWidth * 0.8, trainHeight, trainHeight * 0.4, trainHeight * 0.4);
+  
+  for (let i = 0; i < remainingEggs; i++) {
+    fill(255); stroke(150); strokeWeight(1);
+    let eggX = (i % 5) * (trainWidth * 0.12) + 15;
+    let eggY = -10 - floor(i / 5) * 15;
+    ellipse(eggX, eggY, 20, 26);
+    noStroke(); fill(255, 200, 0);
+    ellipse(eggX, eggY + 3, 10, 10);
+  }
+  pop();
+}
+
+function drawAnalogClock(x, y, radius) {
+  push(); translate(x, y);
+  stroke(50); strokeWeight(4); fill(255);
+  ellipse(0, 0, radius * 2, radius * 2);
+  let angle = map(timerFrames, 0, maxFrames, 0, TWO_PI);
+  noStroke(); fill(255, 100, 100, 150);
+  arc(0, 0, radius * 1.8, radius * 1.8, -HALF_PI, -HALF_PI + angle, PIE);
+  stroke(50); strokeWeight(3);
+  let handX = cos(-HALF_PI + angle) * (radius * 0.7);
+  let handY = sin(-HALF_PI + angle) * (radius * 0.7);
+  line(0, 0, handX, handY);
+  fill(50); noStroke(); ellipse(0, 0, 8, 8);
+  pop();
+}
+
+function updateMakkuros(diff) {
+  let interval = max(15, 60 - diff * 12);
+  if (frameCount % floor(interval) === 0) {
+    makkuros.push({ x: random(50, width - 50), y: -50, speed: 4 + diff, size: min(width, height) * 0.08 });
+  }
+  
+  for (let i = makkuros.length - 1; i >= 0; i--) {
+    let m = makkuros[i];
+    m.y += m.speed;
+    
+    if (m.y > trainY - m.size*0.3 && m.y < trainY + trainHeight && m.x > trainX - m.size*0.3 && m.x < trainX + trainWidth) {
+      remainingEggs--;
+      hitCount++; 
+      
+      fallingEggs.push({ 
+        x: trainX + random(trainWidth * 0.5), 
+        y: trainY, 
+        vx: random(-4, 4), 
+        vy: -7, 
+        rot: 0, 
+        rotV: random(-0.1, 0.1) 
+      });
+      
+      makkuros.splice(i, 1);
+      
+      if (hitCount >= 2 && remainingEggs > 0) {
+        hitCount = 0; 
+        gameState = "clean_up";
+        setupCleanUp();
+      }
+      continue;
+    }
+    if (m.y > height) makkuros.splice(i, 1);
+  }
+}
+
+// --- ながれ星の更新と描画 ---
+function updateBonusStar() {
+  if (!bonusStar && frameCount % 300 === 0 && random() < 0.7) {
+    bonusStar = {
+      x: random(width * 0.1, width * 0.9),
+      y: -40,
+      size: min(width, height) * 0.1,
+      speed: 2.5
+    };
+  }
+  
+  if (bonusStar) {
+    bonusStar.y += bonusStar.speed;
+    if (bonusStar.y > height + 50) {
+      bonusStar = null;
+    }
+  }
+}
+
+function drawBonusStar() {
+  if (!bonusStar) return;
+  push();
+  translate(bonusStar.x, bonusStar.y);
+  rotate(frameCount * 0.03);
+  fill(255, 220, 0);
+  stroke(255, 150, 0);
+  strokeWeight(3);
+  drawStarShape(0, 0, bonusStar.size * 0.4, bonusStar.size * 0.8, 5);
+  pop();
+}
+
+function drawStarShape(x, y, radius1, radius2, npoints) {
+  let angle = TWO_PI / npoints;
+  let halfAngle = angle / 2.0;
+  beginShape();
+  for (let a = 0; a < TWO_PI; a += angle) {
+    let sx = x + cos(a) * radius2;
+    let sy = y + sin(a) * radius2;
+    vertex(sx, sy);
+    sx = x + cos(a + halfAngle) * radius1;
+    sy = y + sin(a + halfAngle) * radius1;
+    vertex(sx, sy);
+  }
+  endShape(CLOSE);
+}
+
+// --- たしざんクイズの作成（5秒カウントダウン付き） ---
+function setupMathQuiz() {
+  let ans = floor(random(6, 11)); // 答えが6〜10
+  let num1 = floor(random(2, ans - 1));
+  let num2 = ans - num1;
+  
+  let choices = [ans];
+  while(choices.length < 3) {
+    let dummy = ans + floor(random(-2, 3));
+    if (dummy >= 1 && dummy <= 12 && !choices.includes(dummy)) {
+      choices.push(dummy);
+    }
+  }
+  choices.sort((a, b) => a - b);
+  
+  currentQuiz = {
+    num1: num1,
+    num2: num2,
+    ans: ans,
+    choices: choices,
+    resultMsg: "",
+    timer: 0,
+    quizLimitFrames: 300 // 5秒 ＝ 300フレーム (60fps)
+  };
+}
+
+function drawMathQuizStage() {
+  textAlign(CENTER, CENTER);
+  
+  // 結果表示中
+  if (currentQuiz.resultMsg !== "") {
+    currentQuiz.timer++;
+    textSize(max(36, width * 0.07));
+    if (currentQuiz.resultMsg === "せいかい！") {
+      fill(255, 80, 80);
+      text("✨ せいかい！ ✨", width / 2, height * 0.4);
+      textSize(max(28, width * 0.05));
+      fill(50);
+      text("たまごが 2こ ふえたよ！ 🥚🥚", width / 2, height * 0.55);
+    } else if (currentQuiz.resultMsg === "ざんねん…") {
+      fill(100);
+      text("ざんねん…！", width / 2, height * 0.4);
+      textSize(max(28, width * 0.05));
+      fill(255, 50, 50);
+      text("たまごが 1こ へっちゃった 🥚", width / 2, height * 0.55);
+    } else { // じかんきれ
+      fill(255, 120, 0);
+      text("⏰ じかんきれ！", width / 2, height * 0.4);
+      textSize(max(24, width * 0.045));
+      fill(100);
+      text("たまごの かずは そのまま！", width / 2, height * 0.55);
+    }
+    
+    if (currentQuiz.timer > 90) { // 約1.5秒後に走行画面へ復帰
+      gameState = "train_run";
+      makkuros = [];
+    }
+    return;
+  }
+  
+  // クイズカウントダウン処理
+  currentQuiz.quizLimitFrames--;
+  let remainSec = ceil(currentQuiz.quizLimitFrames / 60);
+  
+  // 5秒経過で時間切れ
+  if (currentQuiz.quizLimitFrames <= 0) {
+    currentQuiz.resultMsg = "じかんきれ";
+    return;
+  }
+  
+  // クイズ出題画面
+  fill(50); noStroke();
+  textSize(max(28, width * 0.05));
+  text("🌟 たしざん クイズ！ 🌟", width / 2, height * 0.12);
+  
+  // 5秒タイマーの大きな表示
+  textSize(max(32, width * 0.06));
+  fill(remainSec <= 2 ? color(255, 50, 50) : color(255, 150, 0));
+  text("⏱️ のこり " + remainSec + " びょう", width / 2, height * 0.22);
+  
+  // 式の表示
+  textSize(max(48, width * 0.1));
+  fill(255, 100, 0);
+  text(currentQuiz.num1 + " ＋ " + currentQuiz.num2 + " ＝ ❓", width / 2, height * 0.38);
+  
+  textSize(max(22, width * 0.04));
+  fill(80);
+  text("こたえを タップしてね！", width / 2, height * 0.52);
+  
+  // 選択肢ボタンの描画
+  let btnWidth = width * 0.22;
+  let btnHeight = height * 0.12;
+  let startX = width / 2 - (btnWidth * 1.2);
+  
+  for (let i = 0; i < currentQuiz.choices.length; i++) {
+    let btnX = startX + i * (btnWidth * 1.2);
+    let btnY = height * 0.70;
+    
+    fill(255);
+    stroke(255, 150, 0);
+    strokeWeight(4);
+    rect(btnX - btnWidth/2, btnY - btnHeight/2, btnWidth, btnHeight, 15);
+    
+    fill(50);
+    noStroke();
+    textSize(max(36, width * 0.07));
+    text(currentQuiz.choices[i], btnX, btnY);
+  }
+}
+
+// --- ステージ3: お掃除 ---
+function setupCleanUp() {
+  cleanMakkuros = [];
+  cleanMakkuros.push({ x: trainX + trainWidth * 0.1, y: trainY + trainHeight * 0.1, size: 55, vx: 0, vy: 0, flying: false });
+  cleanMakkuros.push({ x: trainX + trainWidth * 0.4, y: trainY - trainHeight * 0.2, size: 60, vx: 0, vy: 0, flying: false });
+  cleanMakkuros.push({ x: trainX + trainWidth * 0.7, y: trainY + trainHeight * 0.3, size: 50, vx: 0, vy: 0, flying: false });
+  cleanMakkuros.push({ x: trainX + trainWidth * 0.2, y: trainY - trainHeight * 0.1, size: 55, vx: 0, vy: 0, flying: false });
+}
+
+function drawCleanUpStage() {
+  fill(50); noStroke(); textAlign(CENTER, TOP);
+  textSize(max(22, width * 0.035));
+  text("たいへん！マックロクロスケが くっついちゃった！", width / 2, height * 0.04);
+  textSize(max(26, width * 0.042)); fill(255, 50, 50);
+  text("タップして びゅーん！って とばしておそうじしよう！", width / 2, height * 0.11);
+
+  for (let i = cleanMakkuros.length - 1; i >= 0; i--) {
+    let cm = cleanMakkuros[i];
+    if (cm.flying) {
+      cm.x += cm.vx; cm.y += cm.vy; cm.vy += 0.6; 
+    }
+    drawMakkuroShape(cm.x, cm.y, cm.size);
+    if (cm.y > height + 100 || cm.x < -100 || cm.x > width + 100) {
+      cleanMakkuros.splice(i, 1);
+    }
+  }
+  
+  if (cleanMakkuros.length === 0) {
+    gameState = "train_run";
+    makkuros = []; 
+  }
+}
+
+function updateFallingEggs() {
+  for (let e of fallingEggs) { e.x += e.vx; e.y += e.vy; e.vy += 0.4; e.rot += e.rotV; }
+}
+
+function drawFallingEggs() {
+  for (let e of fallingEggs) {
+    push(); translate(e.x, e.y); rotate(e.rot);
+    fill(255); stroke(150); strokeWeight(1); ellipse(0, 0, 20, 26);
+    fill(139, 69, 19, 180); noStroke(); ellipse(-4, 2, 8, 5); 
+    pop();
+  }
+}
+
+function drawGround() { fill(139, 69, 19); noStroke(); rect(0, height * 0.8, width, height * 0.2); }
+function drawMakkuros() { for(let m of makkuros) drawMakkuroShape(m.x, m.y, m.size); }
+
+function drawMakkuroShape(x, y, s) {
+  push(); translate(x, y); noStroke();
+  
+  fill(20, 20, 20);
+  let spikes = 12;
+  beginShape();
+  for (let i = 0; i < spikes; i++) {
+    let angle = TWO_PI / spikes * i;
+    let r = (i % 2 === 0) ? s * 0.5 : s * 0.4;
+    vertex(cos(angle) * r, sin(angle) * r);
+  }
+  endShape(CLOSE);
+  
+  fill(255);
+  ellipse(-s * 0.15, -s * 0.05, s * 0.3, s * 0.35);
+  ellipse(s * 0.15, -s * 0.05, s * 0.3, s * 0.35);
+  
+  fill(0);
+  ellipse(-s * 0.12, -s * 0.05, s * 0.12, s * 0.12);
+  ellipse(s * 0.18, -s * 0.05, s * 0.12, s * 0.12);
+  
+  pop();
+}
+
+// --- リザルト画面 ---
+function setupResultParticles() {
+  for (let i = 0; i < 120; i++) {
+    particles.push({
+      x: random(width), y: height + random(20, 200),
+      vx: random(-3, 3), vy: random(-12, -22),
+      size: random(10, 20), c: color(random(255), random(255), random(255))
+    });
+  }
+}
+
+function drawResult() {
+  for (let p of particles) {
+    p.x += p.vx; p.y += p.vy; p.vy += 0.3; 
+    fill(p.c); noStroke(); rect(p.x, p.y, p.size, p.size);
+  }
+
+  textAlign(CENTER, CENTER);
+  if (remainingEggs > 0) {
+    textSize(max(40, width * 0.08)); fill(255, 69, 0);
+    text("🎉 やったー！ 🎉", width / 2, height * 0.3);
+  } else {
+    textSize(max(40, width * 0.07)); fill(120, 120, 120);
+    text("がんばったね！", width / 2, height * 0.3);
+  }
+  
+  textSize(max(44, width * 0.09)); fill(255, 120, 0); stroke(255); strokeWeight(8);
+  text("てんすう: " + max(0, remainingEggs) + " てん！", width / 2, height * 0.5);
+  
+  noStroke(); fill(50); textSize(max(24, width * 0.04));
+  let review = remainingEggs >= 10 ? "👑 ぱーふぇくと！かみワザ！ 👑" : remainingEggs >= 7 ? "✨ すごい！マックロマスターだ！ ✨" : remainingEggs >= 4 ? "👍 いっぱいはこべたね！ 👍" : "🥚 つぎはもっと はこべるよ！";
+  text(review, width / 2, height * 0.68);
+  
+  textSize(max(20, width * 0.035)); fill(255, 100, 100);
+  text("画面を タップして エンディングを みよう！ 👉", width / 2, height * 0.85);
+}
+
+// --- エンディング画面 ---
+function setupEnding() {
+  pikmins = [];
+  let numPikmins = max(1, remainingEggs);
+  let pikminColors = [color(255, 50, 50), color(50, 50, 255), color(255, 220, 0)];
+  
+  for (let i = 0; i < numPikmins; i++) {
+    pikmins.push({
+      x: random(-100, -20),
+      y: height * 0.65 + random(-30, 30),
+      targetX: width / 2 + random(-100, 100),
+      c: random(pikminColors),
+      size: min(width, height) * 0.05,
+      isEating: false,
+      mouthOpen: false
+    });
+  }
+}
+
+function drawEndingStage() {
+  endingTimer++;
+  
+  push(); translate(width / 2, height * 0.65);
+  if (remainingEggs > 0) {
+    for (let i = 0; i < remainingEggs; i++) {
+      let eggX = (i % 4) * 30 - 45;
+      let eggY = -floor(i / 4) * 20;
+      let shrink = (endingTimer > 150) ? max(0, 1 - (endingTimer - 150) * 0.005) : 1;
+      
+      if (shrink > 0) {
+        fill(255); stroke(100); strokeWeight(2);
+        ellipse(eggX, eggY, 40 * shrink, 52 * shrink);
+        noStroke(); fill(255, 200, 0);
+        ellipse(eggX, eggY + 6 * shrink, 20 * shrink, 20 * shrink);
+      }
+    }
+  } else {
+    fill(200); rect(-50, 10, 100, 10, 5);
+  }
+  pop();
+
+  for (let p of pikmins) {
+    if (p.x < p.targetX) {
+      p.x += 2.5; 
+    } else {
+      p.isEating = true; 
+    }
+    
+    push(); translate(p.x, p.y);
+    fill(p.c); noStroke();
+    ellipse(0, 0, p.size * 0.7, p.size); 
+    ellipse(0, -p.size * 0.6, p.size * 0.8, p.size * 0.7); 
+    
+    fill(255); ellipse(-p.size*0.15, -p.size*0.65, p.size*0.25, p.size*0.25);
+    fill(0); ellipse(-p.size*0.15, -p.size*0.65, p.size*0.1, p.size*0.1);
+    
+    stroke(50, 180, 50); strokeWeight(3);
+    line(0, -p.size * 0.9, 0, -p.size * 1.3); 
+    noStroke(); fill(50, 200, 50);
+    ellipse(p.size * 0.1, -p.size * 1.3, p.size * 0.4, p.size * 0.2); 
+    
+    if (p.isEating && remainingEggs > 0) {
+      if (frameCount % 15 === 0) p.mouthOpen = !p.mouthOpen;
+      if (p.mouthOpen) {
+        fill(255, 100, 100); ellipse(p.size * 0.2, -p.size * 0.5, p.size * 0.15, p.size * 0.15); 
+      }
+    }
+    pop();
+  }
+
+  textAlign(CENTER, CENTER);
+  fill(50); noStroke();
+  textSize(max(26, width * 0.045));
+  if (remainingEggs > 0) {
+    text("ピクミンたちが たまごを もぐもぐ 食べているよ！", width / 2, height * 0.15);
+    textSize(max(22, width * 0.035)); fill(100);
+    text("「まもってくれて ありがとう！」だって！", width / 2, height * 0.25);
+  } else {
+    text("たまごが なくなっちゃった…", width / 2, height * 0.15);
+    textSize(max(22, width * 0.035)); fill(100);
+    text("つぎは マックロクロスケを よけて たまごを のこそう！", width / 2, height * 0.25);
+  }
+
+  textSize(max(18, width * 0.03)); fill(120);
+  text("ともだちや 家族と もういちど 遊ぶときは タップしてね！", width / 2, height * 0.88);
+}
+
+// --- クリック・タッチイベント判定の共通処理 ---
+function handlePress(inputX, inputY) {
+  if (gameState === "make_eggs") {
+    for (let e of eggs) {
+      if (dist(inputX, inputY, e.x, e.y) < e.size*0.5 && !e.isBoiled) {
+        e.isBoiled = true; boiledCount++;
+        if (boiledCount >= maxEggs) gameState = "train_run";
+      }
+    }
+  } else if (gameState === "train_run") {
+    if (bonusStar && dist(inputX, inputY, bonusStar.x, bonusStar.y) < bonusStar.size) {
+      bonusStar = null;
+      gameState = "math_quiz";
+      setupMathQuiz();
+    }
+  } else if (gameState === "math_quiz" && currentQuiz.resultMsg === "") {
+    let btnWidth = width * 0.22;
+    let btnHeight = height * 0.12;
+    let startX = width / 2 - (btnWidth * 1.2);
+    
+    for (let i = 0; i < currentQuiz.choices.length; i++) {
+      let btnX = startX + i * (btnWidth * 1.2);
+      let btnY = height * 0.70;
+      
+      if (abs(inputX - btnX) < btnWidth/2 && abs(inputY - btnY) < btnHeight/2) {
+        if (currentQuiz.choices[i] === currentQuiz.ans) {
+          currentQuiz.resultMsg = "せいかい！";
+          remainingEggs = min(12, remainingEggs + 2); // 正解：たまご+2（上限12）
+        } else {
+          currentQuiz.resultMsg = "ざんねん…";
+          remainingEggs = max(0, remainingEggs - 1); // 不正解：たまご-1（下限0）
+        }
+      }
+    }
+  } else if (gameState === "clean_up") {
+    for (let cm of cleanMakkuros) {
+      if (!cm.flying && dist(inputX, inputY, cm.x, cm.y) < cm.size * 0.7) {
+        cm.flying = true;
+        cm.vx = random(-15, 15); 
+        cm.vy = random(-18, -25); 
+      }
+    }
+  } else if (gameState === "result") {
+    setupEnding();
+    gameState = "ending";
+  } else if (gameState === "ending") {
+    initGame(); 
+    gameState = "make_eggs";
+  }
+}
+
+function mousePressed() {
+  if (touches.length === 0) {
+    handlePress(mouseX, mouseY);
+  }
+}
+
+function touchStarted() {
+  if (touches.length > 0) {
+    handlePress(touches[0].x, touches[0].y);
+  }
+  return false; 
+}
+</script>
+</body>
+</html>
