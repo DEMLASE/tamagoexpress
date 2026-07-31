@@ -132,62 +132,65 @@ function playBGM(state) {
   stopBGM();
   currentBgmTrack = state;
   
-  let now = audioCtx.currentTime;
-  let bpm = 120;
-  
   if (state === "make_eggs") {
     // ほのぼのゆったりBGM (C, E, G, A メロディ)
-    bpm = 100;
     let notes = [261.63, 329.63, 392.00, 440.00, 392.00, 329.63];
-    playMelodyLoop(notes, 0.4, "sine", 0.08);
+    let durations = [0.4, 0.4, 0.4, 0.4, 0.4, 0.4];
+    playMelodyLoopWithRhythm(notes, durations, "sine", 0.08);
   } else if (state === "train_run") {
-    // たのしいガタゴト汽車BGM (明るい軽快テンポ)
-    bpm = 140;
-    let notes = [261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88, 523.25];
-    playMelodyLoop(notes, 0.25, "triangle", 0.1);
+    // ご指定のメロディ：ド・ファ・ラ・ラ・ソ・ラ (C4, F4, A4, A4, G4, A4)
+    // リズム：タ タ タ タン タ タン (短・短・短・長・短・長)
+    let notes = [261.63, 349.23, 440.00, 440.00, 392.00, 440.00];
+    let durations = [0.18, 0.18, 0.18, 0.36, 0.18, 0.36];
+    playMelodyLoopWithRhythm(notes, durations, "triangle", 0.1);
   } else if (state === "math_quiz") {
     // クイズ緊張感BGM
-    bpm = 150;
     let notes = [523.25, 493.88, 440.00, 392.00];
-    playMelodyLoop(notes, 0.2, "square", 0.05);
+    let durations = [0.2, 0.2, 0.2, 0.2];
+    playMelodyLoopWithRhythm(notes, durations, "square", 0.05);
   } else if (state === "clean_up") {
     // ちょっとあわただしい掃除BGM
-    bpm = 130;
     let notes = [329.63, 349.23, 392.00, 349.23, 329.63, 293.66];
-    playMelodyLoop(notes, 0.3, "sawtooth", 0.04);
+    let durations = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3];
+    playMelodyLoopWithRhythm(notes, durations, "sawtooth", 0.04);
   } else if (state === "result" || state === "ending") {
     // ファンファーレ＆お祝いBGM
-    bpm = 110;
     let notes = [261.63, 329.63, 392.00, 523.25, 392.00, 523.25];
-    playMelodyLoop(notes, 0.35, "sine", 0.12);
+    let durations = [0.35, 0.35, 0.35, 0.35, 0.35, 0.35];
+    playMelodyLoopWithRhythm(notes, durations, "sine", 0.12);
   }
 }
 
-function playMelodyLoop(notes, noteDuration, type, vol) {
+function playMelodyLoopWithRhythm(notes, durations, type, vol) {
   if (!audioCtx) return;
   
   function playNext() {
     if (!isAudioStarted || currentBgmTrack === "") return;
     let now = audioCtx.currentTime;
+    let currentTimeOffset = 0;
+    
     for (let i = 0; i < notes.length; i++) {
       let osc = audioCtx.createOscillator();
       let gain = audioCtx.createGain();
+      let d = durations[i];
       
       osc.type = type;
-      osc.frequency.setValueAtTime(notes[i], now + i * noteDuration);
+      osc.frequency.setValueAtTime(notes[i], now + currentTimeOffset);
       
-      gain.gain.setValueAtTime(vol, now + i * noteDuration);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + (i + 0.9) * noteDuration);
+      gain.gain.setValueAtTime(vol, now + currentTimeOffset);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + currentTimeOffset + d * 0.9);
       
       osc.connect(gain);
       gain.connect(audioCtx.destination);
       
-      osc.start(now + i * noteDuration);
-      osc.stop(now + (i + 0.95) * noteDuration);
+      osc.start(now + currentTimeOffset);
+      osc.stop(now + currentTimeOffset + d * 0.95);
       
       bgmOscList.push(osc);
+      currentTimeOffset += d;
     }
-    let loopTime = notes.length * noteDuration * 1000;
+    
+    let loopTime = currentTimeOffset * 1000;
     setTimeout(playNext, loopTime);
   }
   playNext();
